@@ -1,9 +1,6 @@
 package co.yolo;
 
-import co.yolo.model.Response;
-import co.yolo.model.Responses;
-import co.yolo.model.Sale;
-import co.yolo.model.User;
+import co.yolo.model.*;
 import me.corsin.javatools.array.ArrayUtils;
 import me.corsin.javatools.http.HttpMethod;
 
@@ -18,12 +15,14 @@ import java.util.UUID;
  */
 public class StolenBuyer {
 
+    private BuyerMethod buyerMethod;
     private String token;
     private double balance;
     private User myUser;
     private double serverTime;
 
-    public StolenBuyer(String token) throws IOException {
+    public StolenBuyer(BuyerMethod buyerMethod, String token) throws IOException {
+        this.buyerMethod = buyerMethod;
         this.token = token;
         checkToken();
     }
@@ -43,12 +42,27 @@ public class StolenBuyer {
     }
 
     public static int userScore(User user) {
-        return (int)user.getLastsale().getTotalTimesPurchased();
+        int score = 0;
+        if (user.isVerified()) {
+            score += 10000;
+        }
+        score += (int)Math.max(1000.0 * (1.0 - user.getLastsale().getSecondsSinceSale() / 3600.0), 0.0);
+        score += (int)user.getLastsale().getTotalTimesPurchased();
+        return score;
     }
 
     private void buyWhatYouCan() {
-        User[] users = ArrayUtils.addItems(getFriends(), getRecentlyStolen());
+        switch (this.buyerMethod) {
+            case FRIENDS:
+                this.buyUsers(getFriends());
+                break;
+            case EFFICIENT:
+                this.buyUsers(ArrayUtils.addItems(getRecentlyStolen(), getMyRecentlyStolen()));
+                break;
+        }
+    }
 
+    private void buyUsers(User[] users) {
         List<User> buyableUsers = new ArrayList<User>();
         for (User user: users) {
             Sale sale = user.getLastsale();
@@ -75,13 +89,15 @@ public class StolenBuyer {
                 User user = buyableUsers.get(0);
                 buyableUsers.remove(0);
 
-                if (user.getLastsale().getDisplayPrice() <= this.balance) {
+                int minScore = this.buyerMethod == BuyerMethod.EFFICIENT ? 10000 : 500;
+
+                if (user.getLastsale().getDisplayPrice() <= this.balance && userScore(user) > minScore) {
                     buyUser(user);
                 }
             }
         } catch (RuntimeException ignored) {
-        }
 
+        }
     }
 
     private void buyUser(User user) {
@@ -96,6 +112,7 @@ public class StolenBuyer {
             harvest(response.getData().getBought());
         } catch (IOException e) {
             if (e.getMessage().contains("too many pets")) {
+                System.out.println("Can't buy anymore, reached max slots");
                 throw new RuntimeException(e.getMessage());
             }
             e.printStackTrace();
@@ -124,6 +141,10 @@ public class StolenBuyer {
     }
 
     private User[] getRecentlyStolen() {
+        return getUsers("lists/recently_stolen");
+    }
+
+    private User[] getMyRecentlyStolen() {
         return getPets("me/pets/recently_stolen");
     }
 
