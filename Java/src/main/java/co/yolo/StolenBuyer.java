@@ -21,6 +21,7 @@ public class StolenBuyer {
     private String token;
     private double balance;
     private User myUser;
+    private double serverTime;
 
     public StolenBuyer(String token) throws IOException {
         this.token = token;
@@ -31,7 +32,6 @@ public class StolenBuyer {
         boolean cont = true;
 
         while (cont) {
-            System.out.println("Harvesting pets");
             harvestAllPets();
 
             buyWhatYouCan();
@@ -53,7 +53,7 @@ public class StolenBuyer {
         for (User user: users) {
             Sale sale = user.getLastsale();
             if (!user.isOwnedBy(this.myUser) && sale != null) {
-                if (sale.getDisplayPrice() > this.balance) {
+                if (sale.getDisplayPrice() > this.balance || sale.getTotalTimesPurchased() == 0) {
                     continue;
                 }
                 if (!buyableUsers.contains(user)) {
@@ -70,14 +70,18 @@ public class StolenBuyer {
             }
         });
 
-        while (!buyableUsers.isEmpty()) {
-            User user = buyableUsers.get(0);
-            buyableUsers.remove(0);
+        try {
+            while (!buyableUsers.isEmpty()) {
+                User user = buyableUsers.get(0);
+                buyableUsers.remove(0);
 
-            if (user.getLastsale().getDisplayPrice() <= this.balance) {
-                buyUser(user);
+                if (user.getLastsale().getDisplayPrice() <= this.balance) {
+                    buyUser(user);
+                }
             }
+        } catch (RuntimeException ignored) {
         }
+
     }
 
     private void buyUser(User user) {
@@ -86,11 +90,14 @@ public class StolenBuyer {
         StolenRequest request = createRequest("people/" + user.getId() + "/buy", HttpMethod.POST);
         request.addParameter("purchase_uuid", user.getLastsale().getPurchaseUuid());
         try {
-             Responses.BuyResponse response = request.response(Responses.BuyResponse.class);
+            Responses.BuyResponse response = request.response(Responses.BuyResponse.class);
             updateMeta(response);
             System.out.println("Bought " + user.getName() + " for " + response.getData().getBought().getLastsale().getLastSalePrice());
             harvest(response.getData().getBought());
         } catch (IOException e) {
+            if (e.getMessage().contains("too many pets")) {
+                throw new RuntimeException(e.getMessage());
+            }
             e.printStackTrace();
         }
     }
@@ -106,8 +113,6 @@ public class StolenBuyer {
         if (user.getLastsale() == null || user.getLastsale().getCurrentHarvestAmount() < 10 || user.getOwner() == null || !user.getOwner().equals(myUser)) {
             return;
         }
-        System.out.println("Harvesting " + user.getName());
-
         StolenRequest request = createRequest("/me/pets/" + user.getId() + "/harvest", HttpMethod.POST);
         try {
             Responses.HarvestResponse response = request.response(Responses.HarvestResponse.class);
@@ -168,12 +173,15 @@ public class StolenBuyer {
     }
 
     private void updateMeta(Response<?> response) {
-        if (response.getMeta() != null && response.getMeta().getWallet() != null) {
-            double balance = response.getMeta().getWallet().getBalance();
-            if (balance != this.balance) {
-                this.balance = balance;
-                System.out.println("Balance is now " + balance);
+        if (response.getMeta() != null) {
+            if (response.getMeta().getWallet() != null) {
+                double balance = response.getMeta().getWallet().getBalance();
+                if (balance != this.balance) {
+                    this.balance = balance;
+                    System.out.println("Balance is now " + balance);
+                }
             }
+            this.serverTime = response.getMeta().getServerTime();
         }
     }
 
