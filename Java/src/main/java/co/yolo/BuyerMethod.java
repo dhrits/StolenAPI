@@ -6,6 +6,7 @@ package co.yolo;
 public enum BuyerMethod {
 
     FRIENDS,
-    EFFICIENT
+    EFFICIENT,
+    INACTIVE
 
 }

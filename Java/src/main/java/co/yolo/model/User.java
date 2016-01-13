@@ -14,6 +14,8 @@ public class User extends Entity {
     private double petWorth;
     private boolean verified;
     private boolean youFollow;
+    private boolean hasLoggedIn;
+    private Identity[] identities;
 
     public boolean isYou() {
         return isYou;
@@ -92,5 +94,21 @@ public class User extends Entity {
 
     public void setYouFollow(boolean youFollow) {
         this.youFollow = youFollow;
+    }
+
+    public Identity[] getIdentities() {
+        return identities;
+    }
+
+    public void setIdentities(Identity[] identities) {
+        this.identities = identities;
+    }
+
+    public boolean isHasLoggedIn() {
+        return hasLoggedIn;
+    }
+
+    public void setHasLoggedIn(boolean hasLoggedIn) {
+        this.hasLoggedIn = hasLoggedIn;
     }
 }

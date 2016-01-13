@@ -1,36 +1,50 @@
 package co.yolo;
 
 import co.yolo.model.*;
-import me.corsin.javatools.array.ArrayUtils;
 import me.corsin.javatools.http.HttpMethod;
+import me.corsin.javatools.task.TaskQueue;
+import me.corsin.javatools.task.ThreadedConcurrentTaskQueue;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.UUID;
+import java.text.DecimalFormat;
+import java.text.NumberFormat;
+import java.util.*;
 
 /**
  * Created by scorsin on 1/13/16.
  */
 public class StolenBuyer {
 
+    public interface UsersFetcher {
+
+        User[] fetch();
+
+    }
+
+
     private BuyerMethod buyerMethod;
     private String token;
     private double balance;
     private User myUser;
     private double serverTime;
+    private TaskQueue processTaskQueue;
 
     public StolenBuyer(BuyerMethod buyerMethod, String token) throws IOException {
         this.buyerMethod = buyerMethod;
         this.token = token;
-        checkToken();
+        this.processTaskQueue = new ThreadedConcurrentTaskQueue(4);
+        getMyProfile();
     }
 
     public void startBecomingRich() {
         boolean cont = true;
 
         while (cont) {
+            try {
+                getMyProfile();
+            } catch (IOException ignored) {
+
+            }
             harvestAllPets();
 
             buyWhatYouCan();
@@ -43,11 +57,16 @@ public class StolenBuyer {
 
     public static int userScore(User user) {
         int score = 0;
-        if (user.isVerified()) {
-            score += 10000;
+
+        if (user.getIdentities() != null && user.getIdentities().length > 0) {
+            long followCount = 0;
+            for (Identity identity : user.getIdentities()) {
+                followCount = Math.max(followCount, identity.getFollowerCount());
+            }
+            score += (int)followCount;
         }
-        score += (int)Math.max(1000.0 * (1.0 - user.getLastsale().getSecondsSinceSale() / 3600.0), 0.0);
-        score += (int)user.getLastsale().getTotalTimesPurchased();
+//        score += (int)Math.max(1000.0 * (1.0 - user.getLastsale().getSecondsSinceSale() / 3600.0), 0.0);
+//        score += (int)user.getLastsale().getTotalTimesPurchased();
         return score;
     }
 
@@ -57,13 +76,32 @@ public class StolenBuyer {
                 this.buyUsers(getFriends());
                 break;
             case EFFICIENT:
-                this.buyUsers(ArrayUtils.addItems(getRecentlyStolen(), getMyRecentlyStolen()));
+                User[] users = fetchUsersSimultaneously(this::getGlobalRecentlyStolen, this::getMyRecentlyStolen);
+                this.buyUsers(users);
+                break;
+            case INACTIVE:
                 break;
         }
     }
 
+    private User[] fetchUsersSimultaneously(UsersFetcher... fetchers) {
+        List<User> users = new ArrayList<>();
+        for (UsersFetcher fetcher : fetchers) {
+            this.processTaskQueue.executeAsync(() -> {
+                User[] fetchedUsers = fetcher.fetch();
+                synchronized (users) {
+                    for (User user : fetchedUsers) {
+                        users.add(user);
+                    }
+                }
+            });
+        }
+        this.processTaskQueue.waitAllTasks();
+        return users.toArray(new User[users.size()]);
+    }
+
     private void buyUsers(User[] users) {
-        List<User> buyableUsers = new ArrayList<User>();
+        List<User> buyableUsers = new ArrayList<>();
         for (User user: users) {
             Sale sale = user.getLastsale();
             if (!user.isOwnedBy(this.myUser) && sale != null) {
@@ -76,12 +114,10 @@ public class StolenBuyer {
             }
         }
 
-        buyableUsers.sort(new Comparator<User>() {
-            public int compare(User o1, User o2) {
-                int o1Score = StolenBuyer.userScore(o1);
-                int o2Score = StolenBuyer.userScore(o2);
-                return o2Score - o1Score;
-            }
+        buyableUsers.sort((o1, o2) -> {
+            int o1Score = StolenBuyer.userScore(o1);
+            int o2Score = StolenBuyer.userScore(o2);
+            return o2Score - o1Score;
         });
 
         try {
@@ -89,7 +125,7 @@ public class StolenBuyer {
                 User user = buyableUsers.get(0);
                 buyableUsers.remove(0);
 
-                int minScore = this.buyerMethod == BuyerMethod.EFFICIENT ? 10000 : 500;
+                int minScore = this.buyerMethod == BuyerMethod.EFFICIENT ? 100000 : 500;
 
                 if (user.getLastsale().getDisplayPrice() <= this.balance && userScore(user) > minScore) {
                     buyUser(user);
@@ -121,9 +157,13 @@ public class StolenBuyer {
 
     private void harvestAllPets() {
         User[] users = getUsers("people/" + myUser.getId() + "/pets");
+
         for (User user : users) {
-            harvest(user);
+            this.processTaskQueue.executeAsync(() -> {
+                harvest(user);
+            });
         }
+        this.processTaskQueue.waitAllTasks();
     }
 
     private void harvest(User user) {
@@ -133,14 +173,14 @@ public class StolenBuyer {
         StolenRequest request = createRequest("/me/pets/" + user.getId() + "/harvest", HttpMethod.POST);
         try {
             Responses.HarvestResponse response = request.response(Responses.HarvestResponse.class);
-            System.out.println("Harvested " + user.getName() + " for " + response.getData().getAmount() + " coins");
+            System.out.println("Harvested " + user.getName() + " for " + formatDouble(response.getData().getAmount()) + " coins");
             updateMeta(response);
         } catch (IOException e) {
             System.out.println("Failed: " + e.getMessage());
         }
     }
 
-    private User[] getRecentlyStolen() {
+    private User[] getGlobalRecentlyStolen() {
         return getUsers("lists/recently_stolen");
     }
 
@@ -182,24 +222,37 @@ public class StolenBuyer {
         }
     }
 
-    private void checkToken() throws IOException {
+    private static String formatDouble(double d) {
+        return DecimalFormat.getInstance(Locale.FRENCH).format(d);
+    }
+
+    private void getMyProfile() throws IOException {
         StolenRequest request = createRequest("/me", HttpMethod.GET);
         Responses.UserResponse response = request.response(Responses.UserResponse.class);
 
         if (!response.isSuccess()) {
             throw new IOException("Unable to login: " + response.getMeta().getErrorMessage());
         }
+        if (this.myUser != null) {
+            double networkDiff = response.getData().getNetWorth() - this.myUser.getNetWorth();
+            if (networkDiff > 0) {
+                System.out.println("Net worth has increased by " + formatDouble(networkDiff) + " up to " + formatDouble(response.getData().getNetWorth()));
+            } else if (networkDiff < 0) {
+                System.out.println("Net worth has decreased by " + formatDouble(networkDiff) + " down to " + formatDouble(response.getData().getNetWorth()));
+            }
+        }
+
         this.myUser = response.getData();
         updateMeta(response);
     }
 
-    private void updateMeta(Response<?> response) {
+    private synchronized void updateMeta(Response<?> response) {
         if (response.getMeta() != null) {
             if (response.getMeta().getWallet() != null) {
                 double balance = response.getMeta().getWallet().getBalance();
                 if (balance != this.balance) {
                     this.balance = balance;
-                    System.out.println("Balance is now " + balance);
+                    System.out.println("Balance is now " + formatDouble(balance));
                 }
             }
             this.serverTime = response.getMeta().getServerTime();
