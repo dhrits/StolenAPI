@@ -1,6 +1,6 @@
 ## Experiments with Stolen App REST API
 Hacking around with Stolen App's REST API. The objective is to build a fake
-automated trading engine :D
+automated trading engine :D VERY MUCH UNDER CONSTRUCTION. Don't judge :|
 
 ## Steps to run
 In order to run the script, you will need a unique_id.txt file in the
