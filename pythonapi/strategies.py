@@ -12,7 +12,6 @@ _FEEDS = {
     TOP: api.get_top,
     FRIENDS: api.get_friends,
     STOLEN: api.get_recently_stolen,
-    
 }
 
 class SimpleStrategy(object):
@@ -44,7 +43,6 @@ class SimpleStrategy(object):
 
             if any([p(me) for p in self.halt_predicates]):
                 break
-            time.sleep(0.200)
             if  me.balance > person.display_price:
                 try:
                     api.buy(person.id, person.purchase_uuid)
@@ -62,6 +60,7 @@ class SimpleStrategy(object):
         while True:
             me = Person(api.get_me())
             if any([p(me) for p in self.halt_predicates]):
+                print "Halt predicate triggered! Exiting!"
                 break
             time.sleep(0.500)
             feed = self.fetch_feed()
