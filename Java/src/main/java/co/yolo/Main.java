@@ -1,7 +1,5 @@
 package co.yolo;
 
-import me.corsin.javatools.http.ServerRequest;
-
 import java.io.IOException;
 
 public class Main {
