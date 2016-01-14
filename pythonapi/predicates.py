@@ -5,7 +5,7 @@ def is_verified(person):
     return person.verified
 
 def is_cheap(person):
-    return float(person.display_price) < 10000
+    return float(person.display_price) < 30000
 
 # Halting predicates
 def has_balance(person):
